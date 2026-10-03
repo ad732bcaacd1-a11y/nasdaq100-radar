@@ -1,6 +1,8 @@
 {
-  "line_channel_access_token": "",
+  "line_channel_access_token": "jfMzWSGjVgeByq5vh85wqM3IMoPyGz4TybR9SrwnbsDPG+Du91alvwfr9j5jsfkIJsk5UeE5WY8kqP9KLW7Kxlp3i5XpqWcLmFB78pQuso+vEUDwD8GFqyVeL0Q4B5zoWZB+jw3xxMuum1Rdr+Eulo9PbdgDzCFqoOLOYbqAITQ=",
   "line_user_id": "",
+  "line_channel_id": "2011845408",
+  "line_channel_secret": "1c6dde0822c61bec223f7030f2d84806",
   "telegram_bot_token": "",
   "telegram_chat_id": "",
   "timeframe": "5m",

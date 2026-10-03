@@ -1,9 +1,5 @@
 """
-通知發送模組
-支援：
-1. LINE Bot Messaging API (全自動推播至手機 LINE)
-2. Telegram Bot (選填備用)
-3. 產生 Webull 專屬個股即時看盤超連結
+通知發送模組 (自動支援 Broadcast 全域推播與 Push Message)
 """
 
 import requests
@@ -14,26 +10,31 @@ logger = logging.getLogger("Notifier")
 
 def send_line_message(token: str, user_id: str, message_text: str) -> bool:
     """
-    透過 LINE Messaging API 發送 Push Message 至指定用戶
+    發送 LINE 訊息：
+    若有 user_id 則使用 Push Message；
+    若無 user_id 則使用 Broadcast（直接發給所有好友/自己）
     """
-    if not token or not user_id or token == "YOUR_LINE_CHANNEL_ACCESS_TOKEN" or user_id == "YOUR_LINE_USER_ID":
-        logger.warning("LINE Token 或 User ID 尚未設定，跳過 LINE 發送。")
+    if not token:
+        logger.warning("LINE Token 尚未設定，跳過 LINE 發送。")
         return False
         
-    url = "https://api.line.me/v2/bot/message/push"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {token}"
     }
-    payload = {
-        "to": user_id,
-        "messages": [
-            {
-                "type": "text",
-                "text": message_text
-            }
-        ]
-    }
+
+    if user_id and user_id.startswith("U"):
+        url = "https://api.line.me/v2/bot/message/push"
+        payload = {
+            "to": user_id,
+            "messages": [{"type": "text", "text": message_text}]
+        }
+    else:
+        # 直接使用全域廣播（發給加好友的自己）
+        url = "https://api.line.me/v2/bot/message/broadcast"
+        payload = {
+            "messages": [{"type": "text", "text": message_text}]
+        }
     
     try:
         resp = requests.post(url, headers=headers, json=payload, timeout=10)
@@ -48,17 +49,13 @@ def send_line_message(token: str, user_id: str, message_text: str) -> bool:
         return False
 
 def send_telegram_message(bot_token: str, chat_id: str, message_text: str) -> bool:
-    """
-    備用：Telegram Bot 發送
-    """
     if not bot_token or not chat_id:
         return False
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": message_text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": False
+        "parse_mode": "HTML"
     }
     try:
         resp = requests.post(url, json=payload, timeout=10)
@@ -67,17 +64,12 @@ def send_telegram_message(bot_token: str, chat_id: str, message_text: str) -> bo
         return False
 
 def build_signal_alert_text(symbol: str, name: str, signal_info: dict) -> str:
-    """
-    組合專業、清晰的警報文字，並附帶 Webull 快速連結
-    """
     price = signal_info.get("price", 0.0)
     pct = signal_info.get("pct_change_5m", 0.0)
     rvol = signal_info.get("rvol", 1.0)
     bar_time = signal_info.get("bar_time", "")
-    
     direction_emoji = "🟢" if pct >= 0 else "🔴"
     
-    # Webull 專屬網頁與 App 連結
     webull_url = f"https://app.webull.com/stocks/{symbol.lower()}"
     
     text = (
