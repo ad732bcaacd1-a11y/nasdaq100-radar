@@ -10,6 +10,6 @@
   "macd_slow": 26,
   "macd_signal": 9,
   "rvol_threshold": 1.8,
-  "scan_interval_seconds": 60,
+  "scan_interval_seconds": 15,
   "enable_premarket_scan": true
 }
