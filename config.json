@@ -3,7 +3,7 @@
   "line_user_id": "",
   "line_channel_id": "2011845408",
   "line_channel_secret": "1c6dde0822c61bec223f7030f2d84806",
-  "gemini_api_key": "ENV_OR_SECRET_CONFIGURED",
+  "gemini_api_key": "QVEuQWI4Uk42SWJMMWhOSldZOHJYVWszMVFmS296UG1RWHJCUTF4VkpfZHQ2LXluYUJoN0E=",
   "gemini_model": "gemini-3-flash-preview",
   "timeframe": "5m",
   "supertrend_atr_period": 10,
@@ -13,5 +13,6 @@
   "macd_signal": 9,
   "rvol_threshold": 1.8,
   "scan_interval_seconds": 15,
+  "ai_news_interval_seconds": 600,
   "enable_premarket_scan": true
 }

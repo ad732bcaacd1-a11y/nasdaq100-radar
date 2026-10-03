@@ -1,9 +1,8 @@
 """
-每小時 AI 財經情報官 (Gemini 旗艦級大腦)
-功能：
-1. 自動抓取 QQQ / 納斯達克最新重大外電新聞
-2. 調用 Google Gemini API 旗艦模型提煉華爾街深度情報
-3. 每整點自動發送 LINE 推播至手機
+高頻 AI 財經情報官 (Gemini 3 旗艦模型 - 每 10 分鐘極速版)
+1. 自動抓取最新 QQQ / 納斯達克重大頭條新聞
+2. Gemini 3 旗艦模型每 10 分鐘深度提煉多空戰報
+3. 支援 Web 網頁專區即時查閱 + LINE 每 10 分鐘定時推播
 """
 
 import urllib.request
@@ -11,11 +10,15 @@ import xml.etree.ElementTree as ET
 import requests
 import json
 import logging
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger("AIReporter")
 
-def fetch_latest_market_news() -> str:
-    """從 Google News RSS 抓取即時 QQQ / 納斯達克頭條新聞"""
+# 儲存最近產生的 AI 報告歷史 (供網頁展示)
+news_reports_history = []
+
+def fetch_latest_market_news() -> list:
+    """從 Google News RSS 抓取即時 QQQ / 納斯達克 / 科技巨頭頭條新聞"""
     try:
         url = 'https://news.google.com/rss/search?q=QQQ+OR+NASDAQ+stock+market&hl=en-US&gl=US&ceid=US:en'
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -23,37 +26,60 @@ def fetch_latest_market_news() -> str:
         root = ET.fromstring(content)
         
         items = []
-        for item in root.findall('./channel/item')[:6]:
+        for item in root.findall('./channel/item')[:8]:
             title = item.find('title').text
             pubDate = item.find('pubDate').text
-            items.append(f"• {title} ({pubDate})")
+            link = item.find('link').text if item.find('link') is not None else ""
+            items.append({
+                "title": title,
+                "pubDate": pubDate,
+                "link": link
+            })
             
-        return "\n".join(items) if items else "暫無最新新聞"
+        return items
     except Exception as e:
         logger.error(f"抓取新聞失敗: {e}")
-        return "無法連線至新聞來源"
+        return []
 
-def generate_ai_market_summary(gemini_api_key: str, news_text: str, model_name: str = "gemini-2.5-pro") -> str:
-    """調用 Gemini 旗艦模型總整新聞"""
+def generate_ai_market_summary(gemini_api_key: str, news_items: list, model_name: str = "gemini-3-flash-preview") -> dict:
+    """調用 Gemini 旗艦模型深度提煉新聞"""
+    tw_now = datetime.now(timezone(timedelta(hours=8))).strftime("%H:%M")
+    
+    if not news_items:
+        return {
+            "time": tw_now,
+            "headline": "暫無重大即時外電",
+            "content": "目前市場暫無最新突發外電，大盤處於常態運行中。",
+            "sentiment": "中性觀望",
+            "sources": []
+        }
+        
+    news_text = "\n".join([f"• {n['title']} ({n['pubDate']})" for n in news_items])
+    
     if not gemini_api_key:
-        return "【QQQ 納指快訊】(尚未填入 Gemini API Key，顯示原始新聞)：\n" + news_text[:300]
+        return {
+            "time": tw_now,
+            "headline": "美股即時快訊 (未配置 AI Key)",
+            "content": news_text[:300],
+            "sentiment": "中性",
+            "sources": news_items[:3]
+        }
         
     prompt = f"""
 你是一位身價百億的華爾街頂級避險基金宏觀量化策略師。
-以下是過去一小時內關於納斯達克 100 (QQQ) 與美股市場的最即時外電新聞：
+以下是過去 10 分鐘內關於納斯達克 100 (QQQ) 與美股市場的最即時外電新聞：
 
 {news_text}
 
-請用繁體中文為你的操盤團隊提煉一份「每小時 QQQ 戰情報告」，排版必須極度專業俐落，適合手機閱讀：
-1. 💥【當前最重大核心焦點】(1~2句話一針見血直擊要害)
-2. 📈【對 QQQ/科技股短線走勢預判】(明確指出：偏多、偏空或高檔震盪，並說明核心邏輯)
-3. 🎯【盤中緊盯焦點與風險】(指出受影響巨頭如 NVDA, AAPL, MSFT 或利率/就業關鍵動向)
+請用繁體中文為你的操盤團隊提煉一份「10分鐘極速 QQQ 操盤戰報」，排版精準俐落：
+1. 💥【當前最重大核心焦點】(1~2句話直擊要害)
+2. 📈【對 QQQ/科技股短線走勢預判】(明確指出：偏多、偏空或高檔震盪，並簡述核心邏輯)
+3. 🎯【盤中緊盯焦點與重點個股】(指出受影響巨頭如 NVDA, AAPL, MSFT, TSLA 或關鍵數據)
 
-字數請嚴格控制在 250 字左右，使用專業金融用語與乾淨的 Emoji 標記。
+字數嚴格控制在 200 字以內，使用專業乾淨的 Emoji 標記。
 """
 
-    # 嘗試呼叫 Gemini API (支援多個模型版本防呆)
-    models_to_try = [model_name, "gemini-2.5-pro", "gemini-1.5-pro", "gemini-2.0-flash"]
+    models_to_try = [model_name, "gemini-3-flash-preview", "gemini-flash-latest"]
     
     for m in models_to_try:
         try:
@@ -63,17 +89,35 @@ def generate_ai_market_summary(gemini_api_key: str, news_text: str, model_name: 
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
                     "temperature": 0.2,
-                    "maxOutputTokens": 800
+                    "maxOutputTokens": 600
                 }
             }
             resp = requests.post(url, headers=headers, json=payload, timeout=20)
             if resp.status_code == 200:
                 data = resp.json()
-                text = data["candidates"][0]["content"]["parts"][0]["text"]
-                return text.strip()
-            else:
-                logger.warning(f"模型 {m} 回應錯誤 ({resp.status_code}): {resp.text}")
+                analysis_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                
+                # 判定市場情緒標籤
+                sentiment = "📈 偏多動能" if any(w in analysis_text for w in ["偏多", "大漲", "上漲", "高點", "降息", "樂觀"]) else \
+                            "📉 偏空防禦" if any(w in analysis_text for w in ["偏空", "下跌", "重挫", "升息", "恐慌", "走弱"]) else "⚖️ 區間震盪"
+                
+                report = {
+                    "time": tw_now,
+                    "sentiment": sentiment,
+                    "content": analysis_text,
+                    "sources": news_items[:4]
+                }
+                news_reports_history.append(report)
+                if len(news_reports_history) > 30:
+                    news_reports_history.pop(0)
+                return report
         except Exception as e:
             logger.error(f"調用 {m} 失敗: {e}")
             
-    return "AI 連線逾時，請檢查 API Key 是否正確。\n\n原始新聞摘要：\n" + news_text[:250]
+    fallback_report = {
+        "time": tw_now,
+        "sentiment": "⚖️ 連線備援",
+        "content": "AI 連線逾時，為您顯示即時新聞：\n" + news_text[:200],
+        "sources": news_items[:3]
+    }
+    return fallback_report
