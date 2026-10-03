@@ -79,7 +79,7 @@ def generate_ai_market_summary(gemini_api_key: str, news_items: list, model_name
 字數嚴格控制在 200 字以內，使用專業乾淨的 Emoji 標記。
 """
 
-    models_to_try = [model_name, "gemini-3-flash-preview", "gemini-flash-latest"]
+    models_to_try = [model_name, "gemini-3-flash-preview", "gemini-1.5-pro"]
     
     for m in models_to_try:
         try:
@@ -88,8 +88,7 @@ def generate_ai_market_summary(gemini_api_key: str, news_items: list, model_name
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
-                    "temperature": 0.2,
-                    "maxOutputTokens": 600
+                    "temperature": 0.2
                 }
             }
             resp = requests.post(url, headers=headers, json=payload, timeout=20)
