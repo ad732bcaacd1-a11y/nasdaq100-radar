@@ -1,6 +1,8 @@
 """
-美股納斯達克 100 雲端即時掃描器 (Webull 買訊雷達) - 高頻極速實時版
-15秒即時輪詢 + 網頁動態無感秒級刷新 + 觸發聲音提示 + 手動即刻掃描
+美股納斯達克 100 雲端即時掃描器 (Webull 買訊雷達 + Gemini 3 旗艦 AI 財經情報官)
+- 15秒即時高頻掃描 QQQ 100 檔股票 (Supertrend + MACD + RVOL 爆量)
+- 每小時自動抓取即時新聞，由 Google Gemini 3 提煉華爾街深度情報推播至 LINE
+- 伺服器啟動時自動發送連線證明
 """
 
 import os
@@ -17,6 +19,7 @@ import uvicorn
 
 from indicators import evaluate_signals
 from notifier import send_line_message, send_telegram_message, build_signal_alert_text
+from ai_reporter import fetch_latest_market_news, generate_ai_market_summary
 
 logging.basicConfig(
     level=logging.INFO,
@@ -50,13 +53,14 @@ system_state = {
     "recent_alerts": [],
     "scan_count": 0,
     "is_scanning": False,
-    "last_scan_duration": 0
+    "last_scan_duration": 0,
+    "last_news_time": "尚未分析"
 }
 
 alerted_cache = set()
 scan_trigger_event = threading.Event()
 
-app = FastAPI(title="NASDAQ 100 Webull Signal Radar")
+app = FastAPI(title="NASDAQ 100 Webull Radar & Gemini AI")
 
 @app.get("/health")
 def health_check():
@@ -71,12 +75,12 @@ def get_status():
         "recent_alerts": system_state["recent_alerts"],
         "scan_count": system_state["scan_count"],
         "is_scanning": system_state["is_scanning"],
-        "last_scan_duration": system_state["last_scan_duration"]
+        "last_scan_duration": system_state["last_scan_duration"],
+        "last_news_time": system_state["last_news_time"]
     }
 
 @app.post("/api/scan_now")
 def trigger_immediate_scan():
-    """手動觸發立即秒級掃描"""
     scan_trigger_event.set()
     return {"message": "即刻掃描已觸發"}
 
@@ -88,7 +92,7 @@ def dashboard():
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>🎯 納指100 實時極速買訊雷達</title>
+        <title>🎯 納指100 實時雷達 & Gemini 3 財經情報官</title>
         <style>
             body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f1117; color: #e0e0e0; margin: 0; padding: 20px; }
             .container { max-width: 950px; margin: auto; }
@@ -97,21 +101,19 @@ def dashboard():
             .badge { display: inline-flex; align-items: center; gap: 6px; background: #00e676; color: #000; padding: 6px 14px; border-radius: 20px; font-weight: bold; font-size: 13px; }
             .pulse { width: 10px; height: 10px; background-color: #000; border-radius: 50%; animation: pulse-anim 1.5s infinite; }
             @keyframes pulse-anim { 0% { transform: scale(0.95); opacity: 1; } 50% { transform: scale(1.3); opacity: 0.5; } 100% { transform: scale(0.95); opacity: 1; } }
-            .btn-scan { background: linear-gradient(135deg, #00c853, #00b0ff); color: #fff; border: none; padding: 10px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 14px; }
-            .btn-scan:hover { opacity: 0.9; transform: translateY(-1px); }
+            .btn-scan { background: linear-gradient(135deg, #00c853, #00b0ff); color: #fff; border: none; padding: 10px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 14px; }
             table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px; }
             th { text-align: left; padding: 12px; background: #222634; color: #8e99b0; border-radius: 4px; }
             td { padding: 12px; border-bottom: 1px solid #262b3b; }
             .webull-link { background: #1e3a5f; color: #38bdf8; padding: 4px 10px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: bold; }
-            .webull-link:hover { background: #2563eb; color: #fff; }
         </style>
     </head>
     <body>
         <div class="container">
             <div class="card header">
                 <div>
-                    <h2 style="margin: 0; color: #00e676;">⚡ 納斯達克 100 實時高頻買訊雷達</h2>
-                    <p style="margin: 6px 0 0 0; color: #8e99b0; font-size: 13px;">即時監控：Supertrend 翻多買訊 + 5分K MACD 黃金交叉 + RVOL 爆量 (>1.8x)</p>
+                    <h2 style="margin: 0; color: #00e676;">⚡ 納指 100 實時雷達 & Gemini 3 操盤情報</h2>
+                    <p style="margin: 6px 0 0 0; color: #8e99b0; font-size: 13px;">15秒高頻掃描 (Supertrend+MACD+爆量) | 每整點 Gemini 3 提煉最新情報推播 LINE</p>
                 </div>
                 <div style="display: flex; gap: 10px; align-items: center;">
                     <button class="btn-scan" onclick="triggerScanNow()">⚡ 立即掃描一輪</button>
@@ -129,19 +131,19 @@ def dashboard():
                     <div style="font-size: 24px; font-weight: bold; color: #38bdf8;" id="stat-count">0 次</div>
                 </div>
                 <div>
-                    <div style="font-size: 12px; color: #8e99b0;">最近耗時</div>
-                    <div style="font-size: 24px; font-weight: bold; color: #a78bfa;" id="stat-duration">0.0s</div>
-                </div>
-                <div>
                     <div style="font-size: 12px; color: #8e99b0;">上次更新時間</div>
                     <div style="font-size: 17px; font-weight: bold; color: #facc15; margin-top: 5px;" id="stat-time">--:--:--</div>
+                </div>
+                <div>
+                    <div style="font-size: 12px; color: #8e99b0;">上次 AI 情報</div>
+                    <div style="font-size: 17px; font-weight: bold; color: #a78bfa; margin-top: 5px;" id="stat-news">--:--:--</div>
                 </div>
             </div>
 
             <div class="card">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <h3 style="margin: 0; color: #fff;">📊 今日觸發買訊 (自動推播至 LINE)</h3>
-                    <span style="font-size: 12px; color: #8e99b0;">🔄 頁面每 2 秒實時無感動態刷新</span>
+                    <span style="font-size: 12px; color: #8e99b0;">🔄 頁面每 2 秒實時動態刷新</span>
                 </div>
                 <div style="overflow-x: auto;">
                     <table>
@@ -157,33 +159,14 @@ def dashboard():
                             </tr>
                         </thead>
                         <tbody id="alerts-tbody">
-                            <tr><td colspan="7" style="text-align: center; padding: 25px; color: #666;">雷達正在連線即時抓取中...</td></tr>
+                            <tr><td colspan="7" style="text-align: center; padding: 25px; color: #666;">雷達正在即時監控中...</td></tr>
                         </tbody>
                     </table>
                 </div>
             </div>
-            <p style="text-align: center; color: #475569; font-size: 12px;">Webull 納指100 實時雷達 | 15 秒極速輪詢架構</p>
         </div>
 
         <script>
-            let prevCount = 0;
-            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            function playBeep() {
-                try {
-                    const osc = audioCtx.createOscillator();
-                    const gain = audioCtx.createGain();
-                    osc.type = 'sine';
-                    osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
-                    osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.1); // A5
-                    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-                    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.35);
-                    osc.connect(gain);
-                    gain.connect(audioCtx.destination);
-                    osc.start();
-                    osc.stop(audioCtx.currentTime + 0.35);
-                } catch(e) {}
-            }
-
             async function refreshStatus() {
                 try {
                     const res = await fetch('/api/status');
@@ -193,18 +176,11 @@ def dashboard():
                     document.getElementById('status-badge').style.background = data.is_scanning ? '#ffca28' : '#00e676';
                     document.getElementById('stat-total').innerText = data.total_tickers + ' 檔';
                     document.getElementById('stat-count').innerText = data.scan_count + ' 次';
-                    document.getElementById('stat-duration').innerText = (data.last_scan_duration || 0) + ' 秒';
                     document.getElementById('stat-time').innerText = data.last_scan_time || '--';
+                    document.getElementById('stat-news').innerText = data.last_news_time || '--';
 
                     const alerts = data.recent_alerts || [];
-                    if (alerts.length > prevCount && prevCount !== 0) {
-                        playBeep(); // 叮咚聲音提示！
-                    }
-                    prevCount = alerts.length;
-
-                    if (alerts.length === 0) {
-                        document.getElementById('alerts-tbody').innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 25px; color: #666;">目前尚未出現三大共振訊號，雷達每 15 秒實時監控中...</td></tr>';
-                    } else {
+                    if (alerts.length > 0) {
                         let html = '';
                         alerts.slice().reverse().forEach(a => {
                             html += `
@@ -244,12 +220,9 @@ def run_scanner_cycle():
     start_t = time.time()
     
     cfg = load_config()
-    line_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", cfg.get("line_channel_access_token", ""))
-    line_user_id = os.environ.get("LINE_USER_ID", cfg.get("line_user_id", ""))
-    tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", cfg.get("telegram_bot_token", ""))
-    tg_chat_id = os.environ.get("TELEGRAM_CHAT_ID", cfg.get("telegram_chat_id", ""))
+    line_token = cfg.get("line_channel_access_token", "")
+    line_user_id = cfg.get("line_user_id", "")
     rvol_thresh = float(cfg.get("rvol_threshold", 1.8))
-    
     tw_now = datetime.now(timezone(timedelta(hours=8))).strftime("%H:%M:%S")
 
     try:
@@ -300,7 +273,6 @@ def run_scanner_cycle():
                         
                         alert_msg = build_signal_alert_text(symbol, name, res)
                         send_line_message(line_token, line_user_id, alert_msg)
-                        send_telegram_message(tg_token, tg_chat_id, alert_msg)
                         
             except Exception as e:
                 pass
@@ -318,6 +290,42 @@ def run_scanner_cycle():
     finally:
         system_state["is_scanning"] = False
 
+def hourly_news_worker():
+    """每整點自動抓取最新 QQQ 新聞，讓 Gemini 3 提煉並推播 LINE"""
+    logger.info("🤖 Gemini 3 AI 每小時財經情報員已就位...")
+    time.sleep(10) # 啟動緩衝
+    
+    # 伺服器啟動時立即發送一則開機戰報證明活著
+    try:
+        cfg = load_config()
+        gemini_key = cfg.get("gemini_api_key", "")
+        line_token = cfg.get("line_channel_access_token", "")
+        news = fetch_latest_market_news()
+        summary = generate_ai_market_summary(gemini_key, news, model_name="gemini-3-flash-preview")
+        tw_now = datetime.now(timezone(timedelta(hours=8))).strftime("%H:%M")
+        full_msg = f"🚀【QQQ 納指雲端雷達正式在線】({tw_now})\n─────────────────\n{summary}\n─────────────────\n🤖 Google Gemini 3 旗艦模型為您守護盤中"
+        send_line_message(line_token, "", full_msg)
+        system_state["last_news_time"] = tw_now
+    except Exception as e:
+        logger.error(f"開機新聞推播失敗: {e}")
+
+    while True:
+        # 每小時 (3600 秒) 執行一次
+        time.sleep(3600)
+        try:
+            cfg = load_config()
+            gemini_key = cfg.get("gemini_api_key", "")
+            line_token = cfg.get("line_channel_access_token", "")
+            news = fetch_latest_market_news()
+            summary = generate_ai_market_summary(gemini_key, news, model_name="gemini-3-flash-preview")
+            tw_now = datetime.now(timezone(timedelta(hours=8))).strftime("%H:%M")
+            full_msg = f"📰【QQQ 納斯達克 AI 每小時情報】({tw_now})\n─────────────────\n{summary}\n─────────────────\n🤖 Google Gemini 3 旗艦大腦為您即時研判"
+            send_line_message(line_token, "", full_msg)
+            system_state["last_news_time"] = tw_now
+            logger.info("已成功推播每小時 Gemini AI 新聞戰報至 LINE！")
+        except Exception as e:
+            logger.error(f"每小時新聞推播異常: {e}")
+
 def background_worker():
     logger.info("⚡ 高頻實時掃描執行緒已就位 (間隔 15 秒)...")
     time.sleep(1)
@@ -329,14 +337,13 @@ def background_worker():
             
         cfg = load_config()
         interval = int(cfg.get("scan_interval_seconds", 15))
-        
-        # 等待 15 秒或直到手動觸發事件
         scan_trigger_event.wait(timeout=interval)
         scan_trigger_event.clear()
 
 threading.Thread(target=background_worker, daemon=True).start()
+threading.Thread(target=hourly_news_worker, daemon=True).start()
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 7860))
     logger.info(f"啟動高頻實時 Web 服務，Port: {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
